@@ -70,7 +70,7 @@ base_trace = go.Surface(
 )
 
 # 4. Generate frames showing the height growing from 0 to f(x,y)
-num_frames = 60
+num_frames = 30
 frames = []
 for i in range(num_frames + 1):
     # Scale the height: from 0 to 1
@@ -104,7 +104,7 @@ layout = go.Layout(
         {
             "buttons": [
                 {
-                    "args": [None, {"frame": {"duration": 60, "redraw": True},
+                    "args": [None, {"frame": {"duration": 15, "redraw": True},
                                      "fromcurrent": True, "mode": "immediate"}],
                     "label": "Play Integration",
                     "method": "animate"
