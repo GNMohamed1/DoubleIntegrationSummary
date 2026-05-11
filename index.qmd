@@ -188,174 +188,159 @@ First sketch the region R, x = 1 to x = 2, y = 0 to y = 2
 import numpy as np
 import plotly.graph_objects as go
 
-# ── Surface data ──────────────────────────────────────────────────────────────
-x_full = np.linspace(0.7, 2.3, 50)
-y_full = np.linspace(-0.2, 2.2, 50)
-Xf, Yf = np.meshgrid(x_full, y_full)
-Zf = Xf**2 + Yf**2
+# ── Resolution knobs — tune these first ───────────────────────────────────────
+nx, ny = 20, 20   # was 35×35 — triangles scale as n², so 20→35 is ~3× more work
+N      = 30       # was 50 frames
+MS     = 80       # ms per frame — was 60, more headroom = fewer skipped frames
 
-nx, ny = 35, 35
+# ── Data ──────────────────────────────────────────────────────────────────────
 x_int = np.linspace(1, 2, nx)
 y_int = np.linspace(0, 2, ny)
+Xi, Yi = np.meshgrid(x_int, y_int)
+Zi = Xi**2 + Yi**2
 
-N = 20
+x_bg = np.linspace(0.7, 2.3, 25)   # background surface also reduced
+y_bg = np.linspace(-0.2, 2.2, 25)
+Xb, Yb = np.meshgrid(x_bg, y_bg)
+Zb = Xb**2 + Yb**2
 
+# ── Pre-compute triangle indices ONCE ─────────────────────────────────────────
+# go.Surface re-triangulates every frame. go.Mesh3d takes explicit i,j,k
+# so as long as the grid topology doesn't change, we compute this once and reuse.
+def grid_triangles(rows, cols):
+    ii, jj, kk = [], [], []
+    for r in range(rows - 1):
+        for c in range(cols - 1):
+            v00 = r * cols + c;      v10 = r * cols + c + 1
+            v01 = (r+1) * cols + c;  v11 = (r+1) * cols + c + 1
+            ii += [v00, v00];  jj += [v10, v11];  kk += [v11, v01]
+    return np.array(ii), np.array(jj), np.array(kk)
+
+reg_i,  reg_j,  reg_k  = grid_triangles(ny, nx)   # full region mesh
+curt_i, curt_j, curt_k = grid_triangles(2,  nx)   # curtain: 2 rows × nx pts
+                                                   # works for both axes since nx==ny
+
+# Flat vertex arrays — topology is fixed, only z changes per frame
+xv = Xi.ravel()
+yv = Yi.ravel()
+zv = Zi.ravel()
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def ease(t):
-  return t * t * (3 - 2 * t)
+    return t * t * (3 - 2 * t)
 
-def blank_surface():
-  return go.Surface(
-    x=np.array([[1,2],[1,2]]),
-    y=np.array([[0,0],[0,0]]),
-    z=np.array([[0,0],[0,0]]),
-    colorscale=[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
-    showscale=False, opacity=0
-  )
+def blank_mesh():
+    return go.Mesh3d(
+        x=[1,1,2], y=[0,1,0], z=[0,0,0],
+        i=[0], j=[1], k=[2],
+        opacity=0, showscale=False
+    )
 
-# ── Build frames ──────────────────────────────────────────────────────────────
-frames = []
+# ── Frames ────────────────────────────────────────────────────────────────────
+frames = [go.Frame(name="blank", data=[blank_mesh(), blank_mesh()], traces=[1, 2])]
 
-# Reset frame
-frames.append(go.Frame(name="blank", data=[blank_surface(), blank_surface()], traces=[1, 2]))
-
-# dxdy: outer y sweeps 0 → 2, curtain moves in y-direction
+# dxdy: curtain sweeps in y direction
 for i in range(N):
-  p = ease((i + 1) / N)
-  y_cur = 2.0 * p
+    p     = ease((i + 1) / N)
+    y_cur = 2.0 * p
 
-  y_acc = np.linspace(0, y_cur, max(2, int(ny * p) + 2))
-  Xi, Yi = np.meshgrid(x_int, y_acc)
-  Zi = Xi**2 + Yi**2
+    # Only z changes — x,y topology is identical every frame (key optimization)
+    z_acc   = np.where(Yi.ravel() <= y_cur + 1e-9, zv, 0.0)
+    cz_top  = x_int**2 + y_cur**2
 
-  X_curt = np.vstack([x_int, x_int])
-  Y_curt = np.full((2, nx), y_cur)
-  Z_curt = np.vstack([np.zeros(nx), x_int**2 + y_cur**2])
+    frames.append(go.Frame(
+        name=f"dxdy_{i}",
+        data=[
+            go.Mesh3d(x=xv, y=yv, z=z_acc,
+                      i=reg_i, j=reg_j, k=reg_k,
+                      color="#d24626", opacity=0.65, showscale=False),
+            go.Mesh3d(x=np.tile(x_int, 2),
+                      y=np.repeat(y_cur, 2 * nx),
+                      z=np.concatenate([np.zeros(nx), cz_top]),
+                      i=curt_i, j=curt_j, k=curt_k,
+                      color="#ff2200", opacity=0.9, showscale=False),
+        ],
+        traces=[1, 2]
+    ))
 
-  frames.append(go.Frame(
-    name=f"dxdy_{i}",
-    data=[
-      go.Surface(x=Xi, y=Yi, z=Zi,
-                  colorscale=[[0,"rgba(210,70,30,0.6)"],[1,"rgba(210,70,30,0.6)"]],
-                  showscale=False, opacity=0.6),
-      go.Surface(x=X_curt, y=Y_curt, z=Z_curt,
-                  colorscale=[[0,"rgba(255,30,0,1.0)"],[1,"rgba(255,30,0,1.0)"]],
-                  showscale=False, opacity=0.95),
-    ],
-    traces=[1, 2]
-  ))
-
-# dydx: outer x sweeps 1 → 2, curtain moves in x-direction
+# dydx: curtain sweeps in x direction
 for i in range(N):
-  p = ease((i + 1) / N)
-  x_cur = 1.0 + 1.0 * p
+    p     = ease((i + 1) / N)
+    x_cur = 1.0 + 1.0 * p
 
-  x_acc = np.linspace(1, x_cur, max(2, int(nx * p) + 2))
-  Xi, Yi = np.meshgrid(x_acc, y_int)
-  Zi = Xi**2 + Yi**2
+    z_acc  = np.where(Xi.ravel() <= x_cur + 1e-9, zv, 0.0)
+    cz_top = x_cur**2 + y_int**2
 
-  Y_curt = np.vstack([y_int, y_int])
-  X_curt = np.full((2, ny), x_cur)
-  Z_curt = np.vstack([np.zeros(ny), x_cur**2 + y_int**2])
-
-  frames.append(go.Frame(
-    name=f"dydx_{i}",
-    data=[
-      go.Surface(x=Xi, y=Yi, z=Zi,
-                colorscale=[[0,"rgba(30,80,210,0.6)"],[1,"rgba(30,80,210,0.6)"]],
-                showscale=False, opacity=0.6),
-      go.Surface(x=X_curt, y=Y_curt, z=Z_curt,
-                  colorscale=[[0,"rgba(0,50,255,1.0)"],[1,"rgba(0,50,255,1.0)"]],
-                  showscale=False, opacity=0.95),
-    ],
-    traces=[1, 2]
-  ))
+    frames.append(go.Frame(
+        name=f"dydx_{i}",
+        data=[
+            go.Mesh3d(x=xv, y=yv, z=z_acc,
+                      i=reg_i, j=reg_j, k=reg_k,
+                      color="#1e50d2", opacity=0.65, showscale=False),
+            go.Mesh3d(x=np.repeat(x_cur, 2 * ny),
+                      y=np.tile(y_int, 2),
+                      z=np.concatenate([np.zeros(ny), cz_top]),
+                      i=curt_i, j=curt_j, k=curt_k,
+                      color="#0032ff", opacity=0.9, showscale=False),
+        ],
+        traces=[1, 2]
+    ))
 
 # ── Figure ────────────────────────────────────────────────────────────────────
-bx = [1, 2, 2, 1, 1]
-by = [0, 0, 2, 2, 0]
-bz = [0, 0, 0, 0, 0]
+bx = [1, 2, 2, 1, 1];  by = [0, 0, 2, 2, 0];  bz = [0, 0, 0, 0, 0]
 
 fig = go.Figure(
-  data=[
-    # 0: full background surface (never touched by frames)
-    go.Surface(x=Xf, y=Yf, z=Zf,
-      colorscale="Viridis", opacity=0.2, showscale=False,
-      name="f(x,y)"),
-    # 1: accumulated region  (updated by frames)
-    blank_surface(),
-    # 2: sweep curtain        (updated by frames)
-    blank_surface(),
-    # 3: floor boundary       (never touched by frames)
-    go.Scatter3d(x=bx, y=by, z=bz, mode="lines",
-      line=dict(color="black", width=4),
-      name="Region boundary"),
-  ],
-  frames=frames,
-  layout=go.Layout(
-    title=dict(text="∬ (x² + y²) dA   |   x ∈ [1,2],  y ∈ [0,2]", font=dict(size=15)),
-    scene=dict(
-        xaxis=dict(title="x", range=[0.7, 2.3]),
-        yaxis=dict(title="y", range=[-0.2, 2.2]),
-        zaxis=dict(title="f(x,y) = x²+y²"),
-        camera=dict(eye=dict(x=1.8, y=-1.8, z=1.2)),
-        aspectmode="manual",
-        aspectratio=dict(x=1, y=1.5, z=1),
-    ),
-    margin=dict(l=0, r=0, t=70, b=60),
-    updatemenus=[
-      dict(
-        type="buttons", showactive=False,
-        x=0.15, y=-0.05, xanchor="center", yanchor="top",
-        buttons=[dict(
-          label="▶  dx dy  (outer y)",
-          method="animate",
-          args=[[f"dxdy_{i}" for i in range(N)],
-            dict(frame=dict(duration=120, redraw=True),
-            transition=dict(duration=0),
-            mode="immediate")]
-        )]),
-        dict(
-          type="buttons", showactive=False,
-          x=0.5, y=-0.05, xanchor="center", yanchor="top",
-          buttons=[dict(
-            label="▶  dy dx  (outer x)",
-            method="animate",
-            args=[[f"dydx_{i}" for i in range(N)],
-              dict(frame=dict(duration=120, redraw=True),
-              transition=dict(duration=0),
-              mode="immediate")]
-        )]),
-        dict(
-          type="buttons", showactive=False,
-          x=0.85, y=-0.05, xanchor="center", yanchor="top",
-          buttons=[dict(
-            label="⏹  Reset",
-            method="animate",
-            args=[["blank"],
-              dict(frame=dict(duration=0, redraw=True),
-              transition=dict(duration=0),
-              mode="immediate")]
-        )]),
-        dict(
-          type="buttons", showactive=True,
-          x=0.5, y=1.05, xanchor="center", yanchor="top",
-          buttons = [
-            dict(
-              label="⬆ Top (2D)",
-              method="relayout",
-              args=[{"scene.camera.eye": {"x": 0, "y": 0, "z": 2.5},
-                      "scene.camera.up":  {"x": 0, "y": 1, "z": 0}}]
-            ),
-            dict(
-              label="↗ 3D view",
-              method="relayout",
-              args=[{"scene.camera.eye": {"x": 1.8, "y": -1.8, "z": 1.2},
-                      "scene.camera.up":  {"x": 0, "y":  0, "z": 1}}]
-            ),
-          ]
-        ),
+    data=[
+        go.Surface(x=Xb, y=Yb, z=Zb,
+                   colorscale="Viridis", opacity=0.2, showscale=False),
+        blank_mesh(),
+        blank_mesh(),
+        go.Scatter3d(x=bx, y=by, z=bz, mode="lines",
+                     line=dict(color="black", width=4)),
     ],
-  )
+    frames=frames,
+    layout=go.Layout(
+        title="∬ (x²+y²) dA   |   x∈[1,2], y∈[0,2]",
+        scene=dict(
+            xaxis=dict(title="x", range=[0.7, 2.3]),
+            yaxis=dict(title="y", range=[-0.2, 2.2]),
+            zaxis=dict(title="f(x,y) = x²+y²"),
+            camera=dict(eye=dict(x=1.8, y=-1.8, z=1.2)),
+            aspectmode="manual",
+            aspectratio=dict(x=1, y=1.5, z=1),
+        ),
+        margin=dict(l=0, r=0, t=70, b=60),
+        updatemenus=[
+            dict(type="buttons", showactive=False,
+                 x=0.15, y=-0.05, xanchor="center", yanchor="top",
+                 buttons=[dict(label="▶ dx dy", method="animate",
+                     args=[[f"dxdy_{i}" for i in range(N)],
+                           dict(frame=dict(duration=MS, redraw=True),
+                                transition=dict(duration=0), mode="immediate")])]),
+            dict(type="buttons", showactive=False,
+                 x=0.5, y=-0.05, xanchor="center", yanchor="top",
+                 buttons=[dict(label="▶ dy dx", method="animate",
+                     args=[[f"dydx_{i}" for i in range(N)],
+                           dict(frame=dict(duration=MS, redraw=True),
+                                transition=dict(duration=0), mode="immediate")])]),
+            dict(type="buttons", showactive=False,
+                 x=0.85, y=-0.05, xanchor="center", yanchor="top",
+                 buttons=[dict(label="⏹ Reset", method="animate",
+                     args=[["blank"],
+                           dict(frame=dict(duration=0, redraw=True),
+                                transition=dict(duration=0), mode="immediate")])]),
+            dict(type="buttons", showactive=True,
+                 x=0.5, y=1.07, xanchor="center", yanchor="top",
+                 buttons=[
+                     dict(label="⬆ Top (2D)", method="relayout",
+                          args=[{"scene.camera.eye": {"x":0,"y":0,"z":2.5},
+                                 "scene.camera.up":  {"x":0,"y":1,"z":0}}]),
+                     dict(label="↗ 3D view", method="relayout",
+                          args=[{"scene.camera.eye": {"x":1.8,"y":-1.8,"z":1.2},
+                                 "scene.camera.up":  {"x":0,"y":0, "z":1}}]),
+                 ]),
+        ],
+    )
 )
 
 fig.show()
@@ -387,3 +372,271 @@ I &= \int_{1}^{2}\int_{0}^{2}(x^{2}+y^{2})dydx \\
 \end{align}
 \end{equation}
 $$
+
+## Pro Tip: changing the order
+
+Sometimes, integrating in the order dydx is impossible (you might get a function that has no anti-derivate)
+
+:::{.callout-important}
+### The Switch-Up
+If you get stuck, try sketching the region and switching from Type I to Type II.
+It’s like changing your perspective—what was a "top/bottom" boundary becomes a "left/right" boundary.
+:::
+
+# 3. Change of Variables (The Space Warp)
+
+Sometimes a region $R$ in the xy-plane is a nightmare to integrate over,
+but if we could "warp" the space into a new coordinate system (u,v) where the region is simpler,
+then we can evaluate the integral more easily.
+
+## The Transformation: From (x,y) to (u,v)
+
+We define $x$ and $y$ in terms of two new variables $u$ and $v$:
+
+$$
+x=g(u,v), \quad y=h(u,v)
+$$
+
+## The Jacobian: The Magic Multiplier
+
+When we change variables, we need to account for how areas are stretched or compressed.
+By multiplying by the Jacobian determinant, we can ensure that the integral still represents the same quantity:
+
+If you change variables from $(x,y)$ to $(u,v)$, the area element transforms as:
+
+$$\Large dA = \begin{vmatrix} \frac{\partial(x,y)}{\partial(u,v)} \end{vmatrix}$$
+
+How to calculate the Jacobian determinant:
+
+$$\Large \frac{\partial(x,y)}{\partial(u,v)} = \det \begin{bmatrix} \frac{\partial{x}}{\partial{u}} & \frac{\partial{x}}{\partial{v}} \\ \frac{\partial{y}}{\partial{u}} & \frac{\partial{y}}{\partial{v}} \end{bmatrix}$$
+
+---
+
+## Final Form:
+
+The general rule for changing variables in a double integral is:
+
+$$\Large \iint_R f(x,y)dxdy = \iint_S f(x(u,v),y(u,v))\begin{vmatrix} \frac{\partial(x,y)}{\partial(u,v)} \end{vmatrix} dudv$$
+
+:::{.callout-note}
+## This isn't in final
+This brief explaining is for the next section to understand the polar coordinates, which is a special case of change of variables, and it is the most common one.
+:::
+
+# 4. Double Integrals in Polar Coordinates
+
+When the region of integration is circular or has radial symmetry, it’s often easier to use polar coordinates instead of Cartesian coordinates.
+
+## The Polar Transformation
+
+We swap our grid system from (x,y) to (r,θ):
+
+  - $x=rcos(\theta)$
+  - $y=rsin(\theta)$
+  - $x^{2} + y^{2} = r^{2}$
+
+The Golden Rule: Don't Forget the $r$!
+
+In Cartesian, $dA = dx \, dy$. But in Polar, the area of a "polar rectangle" grows as you move further from the origin. Therefore, the area element becomes:
+
+$$dA=rdrd\theta$$
+
+:::{.callout-warning}
+## Common Mistake Alert
+When switching to polar coordinates, many forget to include the $r$ in the area element, which leads to incorrect results.
+so don't forget $dA=rdrd\theta$ not $dA=drd\theta$
+:::
+
+## How to Build the Integral
+
+To convert $\iint_D f(x,y) \, dA$ to polar:
+
+1. Replace $x$ and $y$ with their polar equivalents.
+2. Replace $dA$ with $r \, dr \, d\theta$.
+3. Find the limits:
+  
+  - $r$ goes from the inner radius to the outer radius.
+  - $\theta$ goes from the starting angle to the ending angle (usually in radians).
+
+## Interact: Sweeping the Polar Region
+
+This graph visualizes how $r$ and $\theta$ define a region. It's not just a box; it's a "wedge" of area.
+
+```{python}
+#| label: polar-region-visual
+#| code-fold: true
+import numpy as np
+import plotly.graph_objects as go
+
+# ── Theme ─────────────────────────────────────────────────────────────────────
+BG   = "#0d0d1a"
+GRID = "#1a1a2e"
+TEXT = "#c8c8e0"
+ZERO = "#2a2a4a"
+
+# ── Curves (polar equations) ──────────────────────────────────────────────────
+theta = np.linspace(0, 2 * np.pi, 600)
+
+curves = [
+    dict(name="Rose       r = cos(2θ)",     r=np.cos(2 * theta),       color="#e040fb", width=2),
+    dict(name="Cardioid   r = 1 + cos(θ)",  r=1 + np.cos(theta),       color="#00e5ff", width=2),
+    dict(name="Limaçon    r = 0.5 + cos(θ)",r=0.5 + np.cos(theta),     color="#69ff47", width=2),
+    dict(name="Spiral     r = θ / (2π)",    r=theta / (2 * np.pi),     color="#ffab40", width=2),
+]
+
+for c in curves:
+    r = c["r"]
+    # Cartesian representation: x = θ, y = r
+    c["cx"] = theta.copy()
+    c["cy"] = r.copy()
+    # Polar representation: x = r·cos(θ), y = r·sin(θ)
+    c["px"] = r * np.cos(theta)
+    c["py"] = r * np.sin(theta)
+
+# ── Axis ranges for each coordinate system ────────────────────────────────────
+CART_XRANGE = [-0.3, 2 * np.pi + 0.3]   # θ ∈ [0, 2π]
+CART_YRANGE = [-2.3, 2.3]               # r range
+POL_RANGE   = [-2.3, 2.3]               # x, y symmetric
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+N = 50
+
+def ease(t):
+    return t * t * (3 - 2 * t)
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+def make_traces(p, reverse=False):
+    """Interpolate all curves at progress p ∈ [0, 1]."""
+    traces = []
+    for c in curves:
+        if not reverse:
+            x = lerp(c["cx"], c["px"], p)
+            y = lerp(c["cy"], c["py"], p)
+        else:
+            x = lerp(c["px"], c["cx"], p)
+            y = lerp(c["py"], c["cy"], p)
+        traces.append(go.Scatter(
+            x=x, y=y, mode="lines",
+            line=dict(color=c["color"], width=c["width"]),
+            name=c["name"]
+        ))
+    return traces
+
+def make_layout_patch(p, reverse=False):
+    """Interpolate axis ranges and labels at progress p."""
+    if not reverse:
+        xr  = [lerp(CART_XRANGE[0], POL_RANGE[0], p),
+                lerp(CART_XRANGE[1], POL_RANGE[1], p)]
+        yr  = [lerp(CART_YRANGE[0], POL_RANGE[0], p),
+                lerp(CART_YRANGE[1], POL_RANGE[1], p)]
+        xtitle = "x" if p >= 0.5 else "θ"
+        ytitle = "y" if p >= 0.5 else "r"
+    else:
+        xr  = [lerp(POL_RANGE[0], CART_XRANGE[0], p),
+                lerp(POL_RANGE[1], CART_XRANGE[1], p)]
+        yr  = [lerp(POL_RANGE[0], CART_YRANGE[0], p),
+                lerp(POL_RANGE[1], CART_YRANGE[1], p)]
+        xtitle = "θ" if p >= 0.5 else "x"
+        ytitle = "r" if p >= 0.5 else "y"
+    return dict(
+        xaxis=dict(range=xr, title=dict(text=xtitle, font=dict(color=TEXT)),
+                   showgrid=True, gridcolor=GRID,
+                   zeroline=True, zerolinecolor=ZERO, zerolinewidth=1,
+                   tickfont=dict(color=TEXT), linecolor=ZERO),
+        yaxis=dict(range=yr, title=dict(text=ytitle, font=dict(color=TEXT)),
+                   showgrid=True, gridcolor=GRID,
+                   zeroline=True, zerolinecolor=ZERO, zerolinewidth=1,
+                   tickfont=dict(color=TEXT), linecolor=ZERO),
+    )
+
+# ── Build frames ──────────────────────────────────────────────────────────────
+frames = []
+
+# Forward: Cartesian → Polar
+for i in range(N + 1):
+    p = ease(i / N)
+    frames.append(go.Frame(
+        name=f"fwd_{i}",
+        data=make_traces(p, reverse=False),
+        layout=make_layout_patch(p, reverse=False),
+    ))
+
+# Reverse: Polar → Cartesian
+for i in range(N + 1):
+    p = ease(i / N)
+    frames.append(go.Frame(
+        name=f"rev_{i}",
+        data=make_traces(p, reverse=True),
+        layout=make_layout_patch(p, reverse=True),
+    ))
+
+# ── Figure ────────────────────────────────────────────────────────────────────
+fig = go.Figure(
+    data=make_traces(0),   # start in Cartesian
+    frames=frames,
+    layout=go.Layout(
+        paper_bgcolor=BG,
+        plot_bgcolor=BG,
+        font=dict(color=TEXT, family="monospace"),
+        title=dict(
+            text="Cartesian  ↔  Polar  —  2D curve transformation",
+            font=dict(size=15, color=TEXT), x=0.5
+        ),
+        xaxis=dict(
+            range=CART_XRANGE, title=dict(text="θ", font=dict(color=TEXT)),
+            showgrid=True, gridcolor=GRID,
+            zeroline=True, zerolinecolor=ZERO, zerolinewidth=1,
+            tickfont=dict(color=TEXT), linecolor=ZERO,
+        ),
+        yaxis=dict(
+            range=CART_YRANGE, title=dict(text="r", font=dict(color=TEXT)),
+            showgrid=True, gridcolor=GRID,
+            zeroline=True, zerolinecolor=ZERO, zerolinewidth=1,
+            tickfont=dict(color=TEXT), linecolor=ZERO,
+        ),
+        legend=dict(
+            bgcolor=BG, bordercolor=GRID, borderwidth=1,
+            font=dict(color=TEXT, size=11),
+            x=1.01, y=1, xanchor="left",
+        ),
+        margin=dict(l=60, r=160, t=70, b=90),
+        updatemenus=[
+            dict(type="buttons", showactive=False,
+                 x=0.18, y=-0.18, xanchor="center",
+                 buttons=[dict(
+                     label="▶  Cartesian → Polar",
+                     method="animate",
+                     args=[[f"fwd_{i}" for i in range(N + 1)],
+                           dict(frame=dict(duration=40, redraw=True),
+                                transition=dict(duration=0),
+                                mode="immediate")]
+                 )]),
+            dict(type="buttons", showactive=False,
+                 x=0.56, y=-0.18, xanchor="center",
+                 buttons=[dict(
+                     label="◀  Polar → Cartesian",
+                     method="animate",
+                     args=[[f"rev_{i}" for i in range(N + 1)],
+                           dict(frame=dict(duration=40, redraw=True),
+                                transition=dict(duration=0),
+                                mode="immediate")]
+                 )]),
+            dict(type="buttons", showactive=False,
+                 x=0.88, y=-0.18, xanchor="center",
+                 buttons=[dict(
+                     label="⏹  Reset",
+                     method="animate",
+                     args=[["fwd_0"],
+                           dict(frame=dict(duration=0, redraw=True),
+                                transition=dict(duration=0),
+                                mode="immediate")]
+                 )]),
+        ],
+    )
+)
+
+fig.show()
+```
+
