@@ -45,90 +45,345 @@ if $f(x,y)=1$ the double integral is the **Area** of the base.
 Below is an interactive plot of $f(x,y)=sin(x)\cdot cos(y)$. You can drag to rotate the surface and pinch to zoom.
 
 ```{python}
-#| label: animated-double-integral
+#| label: Intro-Double-Integral
+#| code-fold: true
+import plotly.graph_objects as go
+import numpy as np
+
+# --Data--
+x = np.linspace(0, 2*np.pi, 60)
+y = np.linspace(0, 2*np.pi, 60)
+X, Y = np.meshgrid(x, y)
+Z = np.sin(X) * np.cos(Y)
+
+# --Camera angle--
+top_cam = dict(eye=dict(x=0, y=0, z=2.5)) #looks flat (2D)
+angle_cam = dict(eye=dict(x=1.5, y=1.5, z=1.5)) #looks 3D
+
+# --animation frames--
+N_FRAMES = 60
+
+def lerp(a,b,t):
+  return a + (b - a) * t
+
+def ease (t):
+  return t * t * (3 - 2 * t) # smoothstep
+
+frames = []
+for i in range(N_FRAMES):
+  p = ease(i / (N_FRAMES - 1))
+  eye = dict(
+    x=lerp(top_cam["eye"]["x"], angle_cam["eye"]["x"], p),
+    y=lerp(top_cam["eye"]["y"], angle_cam["eye"]["y"], p),
+    z=lerp(top_cam["eye"]["z"], angle_cam["eye"]["z"], p),
+  )
+  frames.append(go.Frame(
+    name=str(i),
+    layout=dict(scene_camera=dict(eye=eye))
+  ))
+
+# --- Figure ---
+fig = go.Figure(
+  data=[go.Surface(
+    x=X, y=Y, z=Z,
+    colorscale="Viridis",
+    reversescale=True,
+    showscale=False,
+    lighting=dict(ambient=1, diffuse=0, specular=0, roughness=1, fresnel=0),
+    lightposition=dict(x=0, y=0, z=0),
+  )],
+  frames=frames,
+  layout=go.Layout(
+    scene=dict(
+      xaxis_title="X",
+      yaxis_title="Y",
+      zaxis_title="Z",
+      camera=top_cam,       # start at top-down view
+    ),
+    margin=dict(l=0, r=0, t=40, b=0),
+    title="f(x,y) = sin(x)·cos(y)",
+    updatemenus=[dict(
+      type="buttons",
+      showactive=False,
+      y=0.05, x=0.5, xanchor="center",
+      buttons=[
+        dict(
+          label="▶ 2D → 3D",
+          method="animate",
+          args=[None, dict(
+            frame=dict(duration=15, redraw=True),
+            transition=dict(duration=15, easing="cubic-in-out"),
+            fromcurrent=True,
+            mode="immediate",
+          )],
+        ),
+        dict(
+          label="⏹ Reset",
+          method="animate",
+          args=[["0"], dict(
+            frame=dict(duration=0, redraw=True),
+            transition=dict(duration=0),
+            mode="immediate",
+            )],
+        ),
+      ],
+    )],
+  ),
+)
+
+fig.show()
+```
+
+---
+
+# 2. Evaluation: The Art of Iterated Integrals
+
+If you can solve simple integrals, you can solve double integrals by breaking them down into iterated integrals.
+Think of it as peeling an onion layer by layer. You peel (integrate) the inner layer first then the outer layer.
+
+## The "Onion" Strategy: Inner vs Outer
+
+To evaluate $\iint_{D}f(x,y)dA$, we can use the "onion" strategy:
+
+$$
+\int_{a}^{b} \left( \int_{g1(x)}^{g2(x)} f(x,y) \, dy \right) dx
+$$
+
+1. **The Inner Integral**: You integrate with respect to y. During this step you treat x as if it were a constant. This gives you a function of x.
+2. **The Outer Integral:** Once the inner part is a function of x only, you integrate with respect to x to get the final answer.
+
+## Type I vs Type II Regions
+
+Each type of region stands for the way we can or take the region
+
+### Type I: The Vertical Slices
+
+The region $D$ lies between two curves $y=g1(x)$ and $y=g2(x)$, and between vertical lines $x=a$ and $x=b$.
+
+  - **Bottom:** $y=g_{1}(x)$
+  - **Top:** $y=g_{2}(x)$
+  - **Order:** $dydx$
+
+### Type II: The Horizontal Slices
+
+The region $D$ lies between two curves $x=h1(y)$ and $x=h2(y)$, and between horizontal lines $y=c$ and $y=d$.
+
+  - **Left:** $x=h_{1}(y)$
+  - **Right:** $x=h_{2}(y)$
+  - **Order:** $dxdy$
+
+## Example 1:Evaluate the double integral
+
+$$
+\int_{0}^{2}\int_{1}{2}(x^{2}+y^{2})dxdy.
+$$
+
+Then Reverse the order of integration and evaluate it
+
+### Solution
+
+First sketch the region R, x = 1 to x = 2, y = 0 to y = 2
+
+```{python}
 import numpy as np
 import plotly.graph_objects as go
 
-# 1. Set up the domains for the region D
-# Choosing limits that show the function clearly
-x_min, x_max = 0, np.pi
-y_min, y_max = 0, np.pi/2
+# ── Surface data ──────────────────────────────────────────────────────────────
+x_full = np.linspace(0.7, 2.3, 50)
+y_full = np.linspace(-0.2, 2.2, 50)
+Xf, Yf = np.meshgrid(x_full, y_full)
+Zf = Xf**2 + Yf**2
 
-x_range = np.linspace(x_min, x_max, 50)
-y_range = np.linspace(y_min, y_max, 50)
-X, Y = np.meshgrid(x_range, y_range)
+nx, ny = 35, 35
+x_int = np.linspace(1, 2, nx)
+y_int = np.linspace(0, 2, ny)
 
-# 2. Define the actual function (target surface)
-Z_final = np.sin(X) * np.cos(Y)
+N = 20
 
-# 3. Create the Start Trace (Frame 0): Flat surface on the floor
-Z_start = np.zeros_like(Z_final)
-base_trace = go.Surface(
-    x=X, y=Y, z=Z_start,
-    colorscale='Blues', opacity=0.8,
-    showscale=False, name='Region D'
-)
+def ease(t):
+  return t * t * (3 - 2 * t)
 
-# 4. Generate frames showing the height growing from 0 to f(x,y)
-num_frames = 30
+def blank_surface():
+  return go.Surface(
+    x=np.array([[1,2],[1,2]]),
+    y=np.array([[0,0],[0,0]]),
+    z=np.array([[0,0],[0,0]]),
+    colorscale=[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,0)"]],
+    showscale=False, opacity=0
+  )
+
+# ── Build frames ──────────────────────────────────────────────────────────────
 frames = []
-for i in range(num_frames + 1):
-    # Scale the height: from 0 to 1
-    alpha = i / num_frames
-    Z_current = Z_final * alpha
-    
-    # Define color transition: Starts Blue (flat), ends Viridis (curved)
-    # This is an optional artistic touch
-    cscale = 'Blues' if i < (num_frames/2) else 'Viridis'
-    
-    frames.append(go.Frame(
-        data=[go.Surface(
-            x=X, y=Y, z=Z_current,
-            colorscale=cscale
-        )],
-        name=f'frame{i}'
-    ))
 
-# 5. Set up Layout with Animation Buttons
-layout = go.Layout(
-    title='Visualizing: Region D → Volume V',
+# Reset frame
+frames.append(go.Frame(name="blank", data=[blank_surface(), blank_surface()], traces=[1, 2]))
+
+# dxdy: outer y sweeps 0 → 2, curtain moves in y-direction
+for i in range(N):
+  p = ease((i + 1) / N)
+  y_cur = 2.0 * p
+
+  y_acc = np.linspace(0, y_cur, max(2, int(ny * p) + 2))
+  Xi, Yi = np.meshgrid(x_int, y_acc)
+  Zi = Xi**2 + Yi**2
+
+  X_curt = np.vstack([x_int, x_int])
+  Y_curt = np.full((2, nx), y_cur)
+  Z_curt = np.vstack([np.zeros(nx), x_int**2 + y_cur**2])
+
+  frames.append(go.Frame(
+    name=f"dxdy_{i}",
+    data=[
+      go.Surface(x=Xi, y=Yi, z=Zi,
+                  colorscale=[[0,"rgba(210,70,30,0.6)"],[1,"rgba(210,70,30,0.6)"]],
+                  showscale=False, opacity=0.6),
+      go.Surface(x=X_curt, y=Y_curt, z=Z_curt,
+                  colorscale=[[0,"rgba(255,30,0,1.0)"],[1,"rgba(255,30,0,1.0)"]],
+                  showscale=False, opacity=0.95),
+    ],
+    traces=[1, 2]
+  ))
+
+# dydx: outer x sweeps 1 → 2, curtain moves in x-direction
+for i in range(N):
+  p = ease((i + 1) / N)
+  x_cur = 1.0 + 1.0 * p
+
+  x_acc = np.linspace(1, x_cur, max(2, int(nx * p) + 2))
+  Xi, Yi = np.meshgrid(x_acc, y_int)
+  Zi = Xi**2 + Yi**2
+
+  Y_curt = np.vstack([y_int, y_int])
+  X_curt = np.full((2, ny), x_cur)
+  Z_curt = np.vstack([np.zeros(ny), x_cur**2 + y_int**2])
+
+  frames.append(go.Frame(
+    name=f"dydx_{i}",
+    data=[
+      go.Surface(x=Xi, y=Yi, z=Zi,
+                colorscale=[[0,"rgba(30,80,210,0.6)"],[1,"rgba(30,80,210,0.6)"]],
+                showscale=False, opacity=0.6),
+      go.Surface(x=X_curt, y=Y_curt, z=Z_curt,
+                  colorscale=[[0,"rgba(0,50,255,1.0)"],[1,"rgba(0,50,255,1.0)"]],
+                  showscale=False, opacity=0.95),
+    ],
+    traces=[1, 2]
+  ))
+
+# ── Figure ────────────────────────────────────────────────────────────────────
+bx = [1, 2, 2, 1, 1]
+by = [0, 0, 2, 2, 0]
+bz = [0, 0, 0, 0, 0]
+
+fig = go.Figure(
+  data=[
+    # 0: full background surface (never touched by frames)
+    go.Surface(x=Xf, y=Yf, z=Zf,
+      colorscale="Viridis", opacity=0.2, showscale=False,
+      name="f(x,y)"),
+    # 1: accumulated region  (updated by frames)
+    blank_surface(),
+    # 2: sweep curtain        (updated by frames)
+    blank_surface(),
+    # 3: floor boundary       (never touched by frames)
+    go.Scatter3d(x=bx, y=by, z=bz, mode="lines",
+      line=dict(color="black", width=4),
+      name="Region boundary"),
+  ],
+  frames=frames,
+  layout=go.Layout(
+    title=dict(text="∬ (x² + y²) dA   |   x ∈ [1,2],  y ∈ [0,2]", font=dict(size=15)),
     scene=dict(
-        xaxis=dict(title='X (Width)', range=[x_min, x_max]),
-        yaxis=dict(title='Y (Depth)', range=[y_min, y_max]),
-        zaxis=dict(title='Z (Height f(x,y))', range=[-0.2, 1.2]),
-        aspectmode='manual',
-        # Set aspect ratio to keep the region proportional
-        aspectratio=dict(x=1, y=0.5, z=0.5) 
+        xaxis=dict(title="x", range=[0.7, 2.3]),
+        yaxis=dict(title="y", range=[-0.2, 2.2]),
+        zaxis=dict(title="f(x,y) = x²+y²"),
+        camera=dict(eye=dict(x=1.8, y=-1.8, z=1.2)),
+        aspectmode="manual",
+        aspectratio=dict(x=1, y=1.5, z=1),
     ),
+    margin=dict(l=0, r=0, t=70, b=60),
     updatemenus=[
-        {
-            "buttons": [
-                {
-                    "args": [None, {"frame": {"duration": 15, "redraw": True},
-                                     "fromcurrent": True, "mode": "immediate"}],
-                    "label": "Play Integration",
-                    "method": "animate"
-                },
-                {
-                    "args": [[None], {"frame": {"duration": 0, "redraw": True},
-                                      "mode": "immediate", "transition": {"duration": 0}}],
-                    "label": "Reset to 2D Region D",
-                    "method": "animate"
-                }
-            ],
-            "direction": "left",
-            "pad": {"r": 10, "t": 87},
-            "showactive": False,
-            "type": "buttons",
-            "x": 0.1,
-            "xanchor": "right",
-            "y": 0,
-            "yanchor": "top"
-        }
-    ]
+      dict(
+        type="buttons", showactive=False,
+        x=0.15, y=-0.05, xanchor="center", yanchor="top",
+        buttons=[dict(
+          label="▶  dx dy  (outer y)",
+          method="animate",
+          args=[[f"dxdy_{i}" for i in range(N)],
+            dict(frame=dict(duration=120, redraw=True),
+            transition=dict(duration=0),
+            mode="immediate")]
+        )]),
+        dict(
+          type="buttons", showactive=False,
+          x=0.5, y=-0.05, xanchor="center", yanchor="top",
+          buttons=[dict(
+            label="▶  dy dx  (outer x)",
+            method="animate",
+            args=[[f"dydx_{i}" for i in range(N)],
+              dict(frame=dict(duration=120, redraw=True),
+              transition=dict(duration=0),
+              mode="immediate")]
+        )]),
+        dict(
+          type="buttons", showactive=False,
+          x=0.85, y=-0.05, xanchor="center", yanchor="top",
+          buttons=[dict(
+            label="⏹  Reset",
+            method="animate",
+            args=[["blank"],
+              dict(frame=dict(duration=0, redraw=True),
+              transition=dict(duration=0),
+              mode="immediate")]
+        )]),
+        dict(
+          type="buttons", showactive=True,
+          x=0.5, y=1.05, xanchor="center", yanchor="top",
+          buttons = [
+            dict(
+              label="⬆ Top (2D)",
+              method="relayout",
+              args=[{"scene.camera.eye": {"x": 0, "y": 0, "z": 2.5},
+                      "scene.camera.up":  {"x": 0, "y": 1, "z": 0}}]
+            ),
+            dict(
+              label="↗ 3D view",
+              method="relayout",
+              args=[{"scene.camera.eye": {"x": 1.8, "y": -1.8, "z": 1.2},
+                      "scene.camera.up":  {"x": 0, "y":  0, "z": 1}}]
+            ),
+          ]
+        ),
+    ],
+  )
 )
 
-# 6. Create initial figure and integrate the animation components
-fig = go.Figure(data=[base_trace], layout=layout, frames=frames)
 fig.show()
 ```
+
+
+First the Type II: Horizontal slice
+
+$$
+\begin{equation}
+\begin{align}
+I &= \int_{0}^{2}\int_{1}^{2}(x^{2}+y^{2})dxdy \\
+  &= \int_{0}^{2}\left[ \frac{x^{3}}{3}+y^{2}x \right]_{1}^{2}dy \\
+  &= \int_{0}^{2}\left( \frac{7}{3} + y^2 \right)dy \\
+  &= \left( \frac{7}{3}y + \frac{y^{3}}{3} \right)_{0}^{2} = \frac{22}{3}
+\end{align}
+\end{equation}
+$$
+
+Second the Type I: Vertical slice Reverse the order of integration
+
+$$
+\begin{equation}
+\begin{align}
+I &= \int_{1}^{2}\int_{0}^{2}(x^{2}+y^{2})dydx \\
+  &= \int_{1}^{2}\left[ x^{2}y + \frac{y^{3}}{3} \right]_{0}^{2}dx \\
+  &= \int_{1}^{2}\left( 2x^{2} + \frac{8}{3} \right)dx \\
+  &= \left( \frac{2}{3}x^{3} + \frac{8}{3}x \right)_{1}^{2} = \frac{22}{3}
+\end{align}
+\end{equation}
+$$
