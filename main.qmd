@@ -1,0 +1,134 @@
+---
+title: "Mastering Double Integration"
+author: "Mohamed Abd-Elkawy"
+format: 
+  html:
+    theme: darkly
+    toc: true
+    code-fold: true
+    html-math-method: katex
+---
+
+# 1. Introduction: From Area to Volume
+
+Remember back in Calculus I when we used a single integral $\int_{a}^{b}f(x)$ to find the area under a curve?
+Now, imagine we want to find the volume under a surface defined by a function of two variables, say $f(x,y)$.
+Here come the double integrals, denoted as $\iint_{D} f(x,y) \, dA$, where $D$ is the region in the $xy$-plane over which we are integrating.
+Now instead of calculating area, we are calculating volume under a surface!
+
+## The "Lego" Analogy
+Imagine you are building a Lego structure.
+Each Lego block represents a small volume element, and the height of the block corresponds to the value of the function $f(x,y)$ at that point.
+To find the volume of this structure:
+  
+  1. You divide the base into small rectangles (like a grid), each with area $dA=dx \cdot dy$.
+  2. Now for each rectangle, you stack a block of height $f(x,y)$.
+  3. The volume of one pillar is approximately $f(x,y) \cdot dA$.
+  4. Then bring the sum of all them!
+
+But to get a better and accurate volume, we need thin pillars, the thinner the more accurate.
+and this process of making the pillars thinner and thinner is what we call "taking the limit" in calculus, which leads us to the double integral.
+Double because we are playing on different y and x for each point in region $D$
+
+$$
+\iint_{D} f(x,y) \, dA
+$$
+
+:::{.callout-tip}
+## The Big Idea
+if $f(x,y)=z$ is the height, then the double integral is the **Volume**.
+if $f(x,y)=1$ the double integral is the **Area** of the base.
+:::
+
+## Interactive Example: Visualizing Double Integrals
+
+Below is an interactive plot of $f(x,y)=sin(x)\cdot cos(y)$. You can drag to rotate the surface and pinch to zoom.
+
+```{python}
+#| label: animated-double-integral
+import numpy as np
+import plotly.graph_objects as go
+
+# 1. Set up the domains for the region D
+# Choosing limits that show the function clearly
+x_min, x_max = 0, np.pi
+y_min, y_max = 0, np.pi/2
+
+x_range = np.linspace(x_min, x_max, 50)
+y_range = np.linspace(y_min, y_max, 50)
+X, Y = np.meshgrid(x_range, y_range)
+
+# 2. Define the actual function (target surface)
+Z_final = np.sin(X) * np.cos(Y)
+
+# 3. Create the Start Trace (Frame 0): Flat surface on the floor
+Z_start = np.zeros_like(Z_final)
+base_trace = go.Surface(
+    x=X, y=Y, z=Z_start,
+    colorscale='Blues', opacity=0.8,
+    showscale=False, name='Region D'
+)
+
+# 4. Generate frames showing the height growing from 0 to f(x,y)
+num_frames = 60
+frames = []
+for i in range(num_frames + 1):
+    # Scale the height: from 0 to 1
+    alpha = i / num_frames
+    Z_current = Z_final * alpha
+    
+    # Define color transition: Starts Blue (flat), ends Viridis (curved)
+    # This is an optional artistic touch
+    cscale = 'Blues' if i < (num_frames/2) else 'Viridis'
+    
+    frames.append(go.Frame(
+        data=[go.Surface(
+            x=X, y=Y, z=Z_current,
+            colorscale=cscale
+        )],
+        name=f'frame{i}'
+    ))
+
+# 5. Set up Layout with Animation Buttons
+layout = go.Layout(
+    title='Visualizing: Region D → Volume V',
+    scene=dict(
+        xaxis=dict(title='X (Width)', range=[x_min, x_max]),
+        yaxis=dict(title='Y (Depth)', range=[y_min, y_max]),
+        zaxis=dict(title='Z (Height f(x,y))', range=[-0.2, 1.2]),
+        aspectmode='manual',
+        # Set aspect ratio to keep the region proportional
+        aspectratio=dict(x=1, y=0.5, z=0.5) 
+    ),
+    updatemenus=[
+        {
+            "buttons": [
+                {
+                    "args": [None, {"frame": {"duration": 60, "redraw": True},
+                                     "fromcurrent": True, "mode": "immediate"}],
+                    "label": "Play Integration",
+                    "method": "animate"
+                },
+                {
+                    "args": [[None], {"frame": {"duration": 0, "redraw": True},
+                                      "mode": "immediate", "transition": {"duration": 0}}],
+                    "label": "Reset to 2D Region D",
+                    "method": "animate"
+                }
+            ],
+            "direction": "left",
+            "pad": {"r": 10, "t": 87},
+            "showactive": False,
+            "type": "buttons",
+            "x": 0.1,
+            "xanchor": "right",
+            "y": 0,
+            "yanchor": "top"
+        }
+    ]
+)
+
+# 6. Create initial figure and integrate the animation components
+fig = go.Figure(data=[base_trace], layout=layout, frames=frames)
+fig.show()
+```
